@@ -1,8 +1,21 @@
 import { create } from 'zustand'
-import { FRIGHTENED_DURATION_MS, RESPAWN_GRACE_MS } from '../game/constants'
-import { cellAt, getInitialPellets, PLAYER_SPAWN, tileKey } from '../game/maze'
-import type { Direction, GameStatus, GridPosition } from '../game/types'
+import { RESPAWN_GRACE_MS } from '../game/constants'
+import {
+  canCollectTicket,
+  getTicketExpiry,
+  isTicketExpired,
+  shouldSpawnTicket,
+  type TicketPhase,
+} from '../game/bonus'
 import { audio } from '../game/audio'
+import {
+  DEFAULT_LEVEL,
+  FINAL_LEVEL,
+  getLevelConfig,
+  type LevelNumber,
+} from '../game/levels'
+import { cellAt, getInitialPellets, getPlayerSpawn, tileKey } from '../game/maze'
+import type { Direction, GameStatus, GridPosition } from '../game/types'
 
 const STARTING_LIVES = 3
 
@@ -15,13 +28,34 @@ function readHighScore(): number {
   }
 }
 
+function readMuted(): boolean {
+  try {
+    return localStorage.getItem('geral-muted') === 'true'
+  } catch {
+    return false
+  }
+}
+
+function persistHighScore(highScore: number): void {
+  try {
+    localStorage.setItem('geral-high-score', String(highScore))
+  } catch {
+    // Storage can be unavailable in private browsing; in-memory play continues.
+  }
+}
+
+const initialMuted = readMuted()
+audio.setMuted(initialMuted)
+
 type GameStore = {
   roundId: number
+  level: LevelNumber
   status: GameStatus
   score: number
   highScore: number
   lives: number
   remainingPellets: Set<string>
+  pelletsEaten: number
   frightenedUntil: number
   invulnerableUntil: number
   ghostCombo: number
@@ -30,14 +64,23 @@ type GameStore = {
   direction: Direction
   queuedDirection: Direction
   playerTile: GridPosition
+  ticketPhase: TicketPhase
+  ticketExpiresAt: number
+  ticketCollectionId: number
+  muted: boolean
   queueDirection: (direction: Direction) => void
   setDirection: (direction: Direction) => void
   setPlayerTile: (position: GridPosition) => void
   collectPellet: (position: GridPosition) => void
+  collectTicket: (position: GridPosition) => void
+  expireTicket: (now?: number) => void
   eatGhost: () => void
   playerHit: () => void
   finishDeath: () => void
+  finishLevelTransition: () => void
+  beginLevel: () => void
   togglePause: () => void
+  toggleMute: () => void
   startGame: () => void
   newGame: () => void
   resetPlayer: () => void
@@ -45,11 +88,13 @@ type GameStore = {
 
 export const useGameStore = create<GameStore>((set) => ({
   roundId: 0,
+  level: DEFAULT_LEVEL.id,
   status: 'ready',
   score: 0,
   highScore: readHighScore(),
   lives: STARTING_LIVES,
-  remainingPellets: getInitialPellets(),
+  remainingPellets: getInitialPellets(DEFAULT_LEVEL.maze),
+  pelletsEaten: 0,
   frightenedUntil: 0,
   invulnerableUntil: 0,
   ghostCombo: 0,
@@ -57,49 +102,106 @@ export const useGameStore = create<GameStore>((set) => ({
   cameraPunch: 0,
   direction: 'NONE',
   queuedDirection: 'NONE',
-  playerTile: PLAYER_SPAWN,
+  playerTile: getPlayerSpawn(DEFAULT_LEVEL.maze),
+  ticketPhase: 'waiting',
+  ticketExpiresAt: 0,
+  ticketCollectionId: 0,
+  muted: initialMuted,
+
   queueDirection: (queuedDirection) => set({ queuedDirection }),
   setDirection: (direction) => set({ direction }),
   setPlayerTile: (playerTile) => set({ playerTile }),
+
   collectPellet: (position) =>
     set((state) => {
+      if (state.status !== 'playing') return state
+
+      const level = getLevelConfig(state.level)
       const key = tileKey(position)
       if (!state.remainingPellets.has(key)) return state
 
       const remainingPellets = new Set(state.remainingPellets)
       remainingPellets.delete(key)
-      const score = state.score + (cellAt(position) === 'o' ? 50 : 10)
+      const cell = cellAt(position, level.maze)
+      const score = state.score + (cell === 'o' ? 50 : 10)
       const highScore = Math.max(state.highScore, score)
-      try {
-        localStorage.setItem('geral-high-score', String(highScore))
-      } catch {
-        // Private browsing policies can deny storage; gameplay should continue.
-      }
+      persistHighScore(highScore)
+
+      const pelletsEaten = state.pelletsEaten + 1
+      const totalPellets = state.remainingPellets.size + state.pelletsEaten
+      const now = performance.now()
+      const spawnTicket = shouldSpawnTicket(
+        pelletsEaten,
+        totalPellets,
+        level.bonus.pelletThreshold,
+        state.ticketPhase,
+      )
+      if (spawnTicket) audio.play('ticketSpawn')
+
       const completed = remainingPellets.size === 0
-      audio.play(completed ? 'levelComplete' : cellAt(position) === 'o' ? 'power' : 'pellet')
+      audio.play(completed ? 'levelComplete' : cell === 'o' ? 'power' : 'pellet')
 
       return {
         remainingPellets,
+        pelletsEaten,
         score,
         highScore,
         frightenedUntil:
-          cellAt(position) === 'o'
-            ? performance.now() + FRIGHTENED_DURATION_MS
-            : state.frightenedUntil,
-        ghostCombo: cellAt(position) === 'o' ? 0 : state.ghostCombo,
+          cell === 'o' ? now + level.frightenedDurationMs : state.frightenedUntil,
+        ghostCombo: cell === 'o' ? 0 : state.ghostCombo,
+        ticketPhase: spawnTicket ? 'visible' : state.ticketPhase,
+        ticketExpiresAt: spawnTicket
+          ? getTicketExpiry(now, level.bonus.visibleDurationMs)
+          : state.ticketExpiresAt,
         status: completed ? 'level-complete' : state.status,
       }
     }),
+
+  collectTicket: (position) =>
+    set((state) => {
+      if (state.status !== 'playing') return state
+      const level = getLevelConfig(state.level)
+      const now = performance.now()
+
+      if (
+        !canCollectTicket({
+          phase: state.ticketPhase,
+          expiresAt: state.ticketExpiresAt,
+          now,
+          playerTile: position,
+          ticketTile: level.bonus.spawnTile,
+        })
+      ) {
+        return isTicketExpired(state.ticketPhase, state.ticketExpiresAt, now)
+          ? { ticketPhase: 'expired' }
+          : state
+      }
+
+      const score = state.score + level.bonus.points
+      const highScore = Math.max(state.highScore, score)
+      persistHighScore(highScore)
+      audio.play('ticketCollect')
+      return {
+        score,
+        highScore,
+        ticketPhase: 'collected',
+        ticketCollectionId: state.ticketCollectionId + 1,
+      }
+    }),
+
+  expireTicket: (now = performance.now()) =>
+    set((state) =>
+      isTicketExpired(state.ticketPhase, state.ticketExpiresAt, now)
+        ? { ticketPhase: 'expired' }
+        : state,
+    ),
+
   eatGhost: () =>
     set((state) => {
       const points = 200 * 2 ** Math.min(state.ghostCombo, 3)
       const score = state.score + points
       const highScore = Math.max(state.highScore, score)
-      try {
-        localStorage.setItem('geral-high-score', String(highScore))
-      } catch {
-        // High score still survives in memory for this session.
-      }
+      persistHighScore(highScore)
       audio.play('ghostEaten')
       return {
         score,
@@ -108,6 +210,7 @@ export const useGameStore = create<GameStore>((set) => ({
         cameraPunch: state.cameraPunch + 1,
       }
     }),
+
   playerHit: () =>
     set((state) => {
       if (
@@ -126,19 +229,57 @@ export const useGameStore = create<GameStore>((set) => ({
         ghostCombo: 0,
       }
     }),
+
   finishDeath: () =>
+    set((state) => {
+      if (state.status !== 'dying') return state
+      if (state.lives <= 0) return { status: 'game-over' }
+
+      const level = getLevelConfig(state.level)
+      return {
+        roundId: state.roundId + 1,
+        status: 'playing',
+        direction: 'NONE',
+        queuedDirection: 'NONE',
+        playerTile: getPlayerSpawn(level.maze),
+        invulnerableUntil: performance.now() + RESPAWN_GRACE_MS,
+      }
+    }),
+
+  finishLevelTransition: () =>
+    set((state) => {
+      if (state.status !== 'level-complete') return state
+      if (state.level === FINAL_LEVEL.id) {
+        audio.play('gameComplete')
+        return { status: 'campaign-complete' }
+      }
+
+      const nextLevel = (state.level + 1) as LevelNumber
+      const config = getLevelConfig(nextLevel)
+      return {
+        roundId: state.roundId + 1,
+        level: nextLevel,
+        status: 'level-ready',
+        remainingPellets: getInitialPellets(config.maze),
+        pelletsEaten: 0,
+        frightenedUntil: 0,
+        invulnerableUntil: 0,
+        ghostCombo: 0,
+        pausedAt: null,
+        cameraPunch: 0,
+        direction: 'NONE',
+        queuedDirection: 'NONE',
+        playerTile: getPlayerSpawn(config.maze),
+        ticketPhase: 'waiting',
+        ticketExpiresAt: 0,
+      }
+    }),
+
+  beginLevel: () =>
     set((state) =>
-      state.lives <= 0
-        ? { status: 'game-over' }
-        : {
-            roundId: state.roundId + 1,
-            status: 'playing',
-            direction: 'NONE',
-            queuedDirection: 'NONE',
-            playerTile: PLAYER_SPAWN,
-            invulnerableUntil: performance.now() + RESPAWN_GRACE_MS,
-          },
+      state.status === 'level-ready' ? { status: 'playing' } : state,
     ),
+
   togglePause: () =>
     set((state) => {
       if (state.status === 'playing') {
@@ -153,21 +294,43 @@ export const useGameStore = create<GameStore>((set) => ({
             state.frightenedUntil > 0 ? state.frightenedUntil + pausedFor : 0,
           invulnerableUntil:
             state.invulnerableUntil > 0 ? state.invulnerableUntil + pausedFor : 0,
+          ticketExpiresAt:
+            state.ticketPhase === 'visible'
+              ? state.ticketExpiresAt + pausedFor
+              : state.ticketExpiresAt,
         }
       }
       return state
     }),
+
+  toggleMute: () =>
+    set((state) => {
+      const muted = !state.muted
+      audio.setMuted(muted)
+      if (!muted) audio.unlock()
+      try {
+        localStorage.setItem('geral-muted', String(muted))
+      } catch {
+        // Muting still works for the current session.
+      }
+      return { muted }
+    }),
+
   startGame: () => {
     audio.unlock()
     set((state) => (state.status === 'ready' ? { status: 'playing' } : state))
   },
-  newGame: () =>
+
+  newGame: () => {
+    audio.unlock()
     set((state) => ({
       roundId: state.roundId + 1,
+      level: DEFAULT_LEVEL.id,
       status: 'playing',
       score: 0,
       lives: STARTING_LIVES,
-      remainingPellets: getInitialPellets(),
+      remainingPellets: getInitialPellets(DEFAULT_LEVEL.maze),
+      pelletsEaten: 0,
       frightenedUntil: 0,
       invulnerableUntil: 0,
       ghostCombo: 0,
@@ -175,12 +338,20 @@ export const useGameStore = create<GameStore>((set) => ({
       cameraPunch: 0,
       direction: 'NONE',
       queuedDirection: 'NONE',
-      playerTile: PLAYER_SPAWN,
-    })),
+      playerTile: getPlayerSpawn(DEFAULT_LEVEL.maze),
+      ticketPhase: 'waiting',
+      ticketExpiresAt: 0,
+      ticketCollectionId: 0,
+    }))
+  },
+
   resetPlayer: () =>
-    set({
-      direction: 'NONE',
-      queuedDirection: 'NONE',
-      playerTile: PLAYER_SPAWN,
+    set((state) => {
+      const level = getLevelConfig(state.level)
+      return {
+        direction: 'NONE',
+        queuedDirection: 'NONE',
+        playerTile: getPlayerSpawn(level.maze),
+      }
     }),
 }))

@@ -1,55 +1,43 @@
+import { LEVEL_1_LAYOUT } from './levels'
+import type { LevelConfig } from './levels'
 import type { GridPosition, MazeCell } from './types'
 
-// The text map is the source of truth for both gameplay and rendering.
-// Keeping it human-readable makes future maze tuning safe and quick.
-export const MAZE_LAYOUT = [
-  '#####################',
-  '#o........#........o#',
-  '#.###.###.#.###.###.#',
-  '#...................#',
-  '#.###.#.#####.#.###.#',
-  '#.....#...#...#.....#',
-  '#####.###.#.###.#####',
-  '#.........#.........#',
-  '#.###.##.....##.###.#',
-  '#.....#..GGGG.#.....#',
-  '###.#.#.#####.#.#.###',
-  '#...#.#...P...#.#...#',
-  '#.###.###.#.###.###.#',
-  '#o..#.....#.....#..o#',
-  '###.#.###.#.###.#.###',
-  '#.....#...#...#.....#',
-  '#.#######.#.#######.#',
-  '#...................#',
-  '#.###.###.#.###.###.#',
-  '#o.................o#',
-  '#####################',
-] as const
+export type MazeLayout = readonly string[]
+export type MazeSource = MazeLayout | Pick<LevelConfig, 'maze'>
 
+// Backwards-compatible Level 1 exports. New code should pass the active maze.
+export const MAZE_LAYOUT = LEVEL_1_LAYOUT
 export const MAZE_ROWS = MAZE_LAYOUT.length
 export const MAZE_COLS = MAZE_LAYOUT[0].length
 
-export function cellAt(position: GridPosition): MazeCell {
-  if (
-    position.row < 0 ||
-    position.row >= MAZE_ROWS ||
-    position.col < 0 ||
-    position.col >= MAZE_COLS
-  ) {
-    return '#'
-  }
-
-  return MAZE_LAYOUT[position.row][position.col] as MazeCell
+function sourceLayout(source: MazeSource): MazeLayout {
+  return 'maze' in source ? source.maze : source
 }
 
-export function isWalkable(position: GridPosition): boolean {
-  return cellAt(position) !== '#'
+export function cellAt(
+  position: GridPosition,
+  source: MazeSource = MAZE_LAYOUT,
+): MazeCell {
+  const layout = sourceLayout(source)
+  const cell = layout[position.row]?.[position.col]
+  return (cell ?? '#') as MazeCell
 }
 
-export function findCells(target: MazeCell): GridPosition[] {
+export function isWalkable(
+  position: GridPosition,
+  source: MazeSource = MAZE_LAYOUT,
+): boolean {
+  return cellAt(position, source) !== '#'
+}
+
+export function findCells(
+  target: MazeCell,
+  source: MazeSource = MAZE_LAYOUT,
+): GridPosition[] {
+  const layout = sourceLayout(source)
   const positions: GridPosition[] = []
 
-  MAZE_LAYOUT.forEach((row, rowIndex) => {
+  layout.forEach((row, rowIndex) => {
     Array.from(row).forEach((cell, colIndex) => {
       if (cell === target) positions.push({ row: rowIndex, col: colIndex })
     })
@@ -58,20 +46,48 @@ export function findCells(target: MazeCell): GridPosition[] {
   return positions
 }
 
-export function gridToWorld({ row, col }: GridPosition): [number, number, number] {
-  return [col - (MAZE_COLS - 1) / 2, 0, row - (MAZE_ROWS - 1) / 2]
+export function gridToWorld(
+  { row, col }: GridPosition,
+  source: MazeSource = MAZE_LAYOUT,
+): [number, number, number] {
+  const layout = sourceLayout(source)
+  const rows = layout.length
+  const cols = layout[0]?.length ?? 0
+  return [col - (cols - 1) / 2, 0, row - (rows - 1) / 2]
 }
 
-export const PLAYER_SPAWN = findCells('P')[0]
+// The first and last playable rows need a little render-only breathing room:
+// perspective otherwise makes actors and pellets appear attached to the outer
+// wall. Logical tiles and navigation remain completely unchanged.
+export function gridToActorWorld(
+  position: GridPosition,
+  source: MazeSource = MAZE_LAYOUT,
+): [number, number, number] {
+  const layout = sourceLayout(source)
+  const world = gridToWorld(position, layout)
+  const edgeInset = 0.24
+
+  if (position.row === 1) world[2] += edgeInset
+  if (position.row === layout.length - 2) world[2] -= edgeInset
+  return world
+}
+
+export function getPlayerSpawn(source: MazeSource = MAZE_LAYOUT): GridPosition {
+  const spawn = findCells('P', source)[0]
+  if (!spawn) throw new Error('Maze does not contain a player spawn')
+  return spawn
+}
+
+export const PLAYER_SPAWN = getPlayerSpawn()
 
 export function tileKey({ row, col }: GridPosition): string {
   return `${row}:${col}`
 }
 
-export function getInitialPellets(): Set<string> {
+export function getInitialPellets(source: MazeSource = MAZE_LAYOUT): Set<string> {
   const pellets = new Set<string>()
 
-  for (const cell of [...findCells('.'), ...findCells('o')]) {
+  for (const cell of [...findCells('.', source), ...findCells('o', source)]) {
     pellets.add(tileKey(cell))
   }
 

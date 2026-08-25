@@ -3,6 +3,7 @@ import {
   cellAt,
   findCells,
   getInitialPellets,
+  gridToActorWorld,
   gridToWorld,
   isWalkable,
   MAZE_COLS,
@@ -57,5 +58,12 @@ describe('maze', () => {
     expect(isWalkable(PLAYER_SPAWN)).toBe(true)
     expect(gridToWorld({ row: 10, col: 10 })).toEqual([0, 0, 0])
     expect(tileKey({ row: 3, col: 7 })).toBe('3:7')
+  })
+
+  it('adds render-only breathing room to the outer playable rows', () => {
+    expect(gridToActorWorld({ row: 1, col: 10 })).toEqual([0, 0, -8.76])
+    expect(gridToActorWorld({ row: 19, col: 10 })).toEqual([0, 0, 8.76])
+    expect(gridToActorWorld({ row: 10, col: 10 })).toEqual([0, 0, 0])
+    expect(gridToWorld({ row: 1, col: 10 })).toEqual([0, 0, -9])
   })
 })

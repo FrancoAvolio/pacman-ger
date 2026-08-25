@@ -5,12 +5,14 @@ import { useGameStore } from '../store/gameStore'
 export function useKeyboardControls() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const store = useGameStore.getState()
       if (
         (event.code === 'Enter' || event.code === 'Space') &&
-        useGameStore.getState().status === 'ready'
+        (store.status === 'ready' || store.status === 'level-ready')
       ) {
         event.preventDefault()
-        useGameStore.getState().startGame()
+        if (store.status === 'ready') store.startGame()
+        else store.beginLevel()
         return
       }
 
@@ -23,6 +25,12 @@ export function useKeyboardControls() {
       if (event.code === 'KeyP' || event.code === 'Escape') {
         event.preventDefault()
         useGameStore.getState().togglePause()
+        return
+      }
+
+      if (event.code === 'KeyM') {
+        event.preventDefault()
+        useGameStore.getState().toggleMute()
         return
       }
 

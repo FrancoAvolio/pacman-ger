@@ -14,7 +14,8 @@ export function StartScreen() {
       <p className="start-screen__subtitle">Una partida para vos.</p>
       <button type="button" onClick={startGame}>Empezar partida</button>
       <div className="start-screen__controls">
-        <span>Flechas / WASD</span>
+        <span className="desktop-control-hint">Flechas / WASD</span>
+        <span className="mobile-control-hint">Deslizá para moverte</span>
         <i />
         <span>P / Esc pausa</span>
       </div>

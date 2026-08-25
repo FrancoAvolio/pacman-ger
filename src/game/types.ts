@@ -14,6 +14,8 @@ export type GameStatus =
   | 'dying'
   | 'game-over'
   | 'level-complete'
+  | 'level-ready'
+  | 'campaign-complete'
 
 export type GhostState = 'CHASE' | 'SCATTER' | 'FRIGHTENED' | 'EATEN'
 

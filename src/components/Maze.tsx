@@ -1,26 +1,33 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import * as THREE from 'three'
-import { MAZE_LAYOUT, gridToWorld } from '../game/maze'
 import { WALL_HEIGHT } from '../game/constants'
+import type { LevelConfig } from '../game/levels'
+import { gridToWorld } from '../game/maze'
 
-export function Maze() {
+type MazeProps = {
+  level: LevelConfig
+}
+
+export function Maze({ level }: MazeProps) {
   const wallPositions = useMemo(
     () =>
-      MAZE_LAYOUT.flatMap((row, rowIndex) =>
+      level.maze.flatMap((row, rowIndex) =>
         Array.from(row).flatMap((cell, colIndex) =>
           cell === '#'
-            ? [gridToWorld({ row: rowIndex, col: colIndex })]
+            ? [gridToWorld({ row: rowIndex, col: colIndex }, level)]
             : [],
         ),
       ),
-    [],
+    [level],
   )
+  const boardRows = level.maze.length
+  const boardCols = level.maze[0]?.length ?? 0
 
   const wallsRef = useRef<THREE.InstancedMesh>(null)
   const accentsRef = useRef<THREE.InstancedMesh>(null)
   const wallGeometry = useMemo(
-    () => new RoundedBoxGeometry(0.9, WALL_HEIGHT, 0.9, 3, 0.1),
+    () => new RoundedBoxGeometry(0.86, WALL_HEIGHT, 0.86, 3, 0.1),
     [],
   )
 
@@ -38,14 +45,20 @@ export function Maze() {
       accentsRef.current?.setMatrixAt(index, matrix)
     })
 
-    if (wallsRef.current) wallsRef.current.instanceMatrix.needsUpdate = true
-    if (accentsRef.current) accentsRef.current.instanceMatrix.needsUpdate = true
+    if (wallsRef.current) {
+      wallsRef.current.count = wallPositions.length
+      wallsRef.current.instanceMatrix.needsUpdate = true
+    }
+    if (accentsRef.current) {
+      accentsRef.current.count = wallPositions.length
+      accentsRef.current.instanceMatrix.needsUpdate = true
+    }
   }, [wallPositions])
 
   return (
     <group>
       <mesh receiveShadow rotation-x={-Math.PI / 2} position-y={-0.035}>
-        <planeGeometry args={[21.8, 21.8]} />
+        <planeGeometry args={[boardCols + 0.8, boardRows + 0.8]} />
         <meshStandardMaterial color="#030610" roughness={0.76} metalness={0.08} />
       </mesh>
 
@@ -65,7 +78,7 @@ export function Maze() {
       </instancedMesh>
 
       <instancedMesh ref={accentsRef} args={[undefined, undefined, wallPositions.length]}>
-        <boxGeometry args={[0.9, 0.028, 0.9]} />
+        <boxGeometry args={[0.86, 0.028, 0.86]} />
         <meshStandardMaterial
           color="#1761d2"
           emissive="#0b45c7"

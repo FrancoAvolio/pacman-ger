@@ -1,7 +1,7 @@
 import type { Direction, GridPosition } from './types'
 
 export const TILE_SIZE = 1
-export const WALL_HEIGHT = 0.72
+export const WALL_HEIGHT = 0.64
 export const PLAYER_SPEED = 5.1
 export const GHOST_SPEED = 3.85
 export const FRIGHTENED_GHOST_SPEED = 2.8

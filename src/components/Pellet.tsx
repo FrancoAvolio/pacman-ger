@@ -1,15 +1,17 @@
 import { useFrame } from '@react-three/fiber'
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { findCells, gridToWorld, tileKey } from '../game/maze'
+import type { LevelConfig } from '../game/levels'
+import { findCells, gridToActorWorld, tileKey } from '../game/maze'
 import { useGameStore } from '../store/gameStore'
 
 type PelletFieldProps = {
   positions: ReturnType<typeof findCells>
+  level: LevelConfig
   power?: boolean
 }
 
-function PelletField({ positions, power = false }: PelletFieldProps) {
+function PelletField({ positions, level, power = false }: PelletFieldProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null)
   const groupRef = useRef<THREE.Group>(null)
   const remainingPellets = useGameStore((state) => state.remainingPellets)
@@ -20,8 +22,8 @@ function PelletField({ positions, power = false }: PelletFieldProps) {
 
     positions.forEach((position) => {
       if (!remainingPellets.has(tileKey(position))) return
-      const [x, , z] = gridToWorld(position)
-      matrix.makeTranslation(x, power ? 0.31 : 0.22, z)
+      const [x, , z] = gridToActorWorld(position, level)
+      matrix.makeTranslation(x, power ? 0.3 : 0.21, z)
       meshRef.current?.setMatrixAt(visibleIndex, matrix)
       visibleIndex += 1
     })
@@ -31,7 +33,7 @@ function PelletField({ positions, power = false }: PelletFieldProps) {
       meshRef.current.instanceMatrix.needsUpdate = true
       meshRef.current.computeBoundingSphere()
     }
-  }, [positions, power, remainingPellets])
+  }, [level, positions, power, remainingPellets])
 
   useFrame(({ clock }) => {
     if (!power || !groupRef.current) return
@@ -42,11 +44,11 @@ function PelletField({ positions, power = false }: PelletFieldProps) {
   return (
     <group ref={groupRef}>
       <instancedMesh ref={meshRef} args={[undefined, undefined, positions.length]}>
-        <sphereGeometry args={[power ? 0.18 : 0.075, power ? 16 : 9, power ? 12 : 7]} />
+        <sphereGeometry args={[power ? 0.165 : 0.066, power ? 16 : 9, power ? 12 : 7]} />
         <meshStandardMaterial
           color={power ? '#fff3c4' : '#ffe8a8'}
           emissive={power ? '#ffc85a' : '#ffbf69'}
-          emissiveIntensity={power ? 3.2 : 2.1}
+          emissiveIntensity={power ? 2.8 : 1.72}
           roughness={0.35}
         />
       </instancedMesh>
@@ -54,14 +56,18 @@ function PelletField({ positions, power = false }: PelletFieldProps) {
   )
 }
 
-export function Pellets() {
-  const pellets = useMemo(() => findCells('.'), [])
-  const powerPellets = useMemo(() => findCells('o'), [])
+type PelletsProps = {
+  level: LevelConfig
+}
+
+export function Pellets({ level }: PelletsProps) {
+  const pellets = useMemo(() => findCells('.', level), [level])
+  const powerPellets = useMemo(() => findCells('o', level), [level])
 
   return (
     <group>
-      <PelletField positions={pellets} />
-      <PelletField positions={powerPellets} power />
+      <PelletField positions={pellets} level={level} />
+      <PelletField positions={powerPellets} level={level} power />
     </group>
   )
 }

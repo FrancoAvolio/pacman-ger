@@ -1,5 +1,11 @@
 import { useFrame } from '@react-three/fiber'
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react'
 import * as THREE from 'three'
 import { actorsCollide } from '../game/collisions'
 import {
@@ -9,12 +15,21 @@ import {
 } from '../game/constants'
 import {
   chooseGhostDirection,
+  getFrightenedVisualState,
   getGhostTarget,
   SCATTER_TARGETS,
   scheduledGhostState,
+  shouldGhostMove,
+  type FrightenedVisualState,
 } from '../game/ghostAI'
-import { findCells, gridToWorld } from '../game/maze'
-import { nextTile, positionsEqual } from '../game/movement'
+import type { LevelConfig } from '../game/levels'
+import { findCells, gridToActorWorld } from '../game/maze'
+import {
+  interpolateMove,
+  positionsEqual,
+  resolveMove,
+  type ResolvedMove,
+} from '../game/movement'
 import { ghostTiles, playerWorldPosition } from '../game/runtime'
 import type {
   Direction,
@@ -38,51 +53,143 @@ const GHOST_YAW: Record<Exclude<Direction, 'NONE'>, number> = {
   LEFT: -Math.PI / 2,
 }
 
+type GhostModelProps = {
+  personality: GhostPersonality
+  modelRef: RefObject<THREE.Group | null>
+  visualState: GhostState
+  frightenedVisual: FrightenedVisualState
+}
+
+function GhostModel({
+  personality,
+  modelRef,
+  visualState,
+  frightenedVisual,
+}: GhostModelProps) {
+  const frightened = visualState === 'FRIGHTENED'
+  const eyesOnly = visualState === 'EATEN'
+  const warning = frightened && frightenedVisual === 'WHITE'
+  const bodyColor = warning
+    ? '#f7fbff'
+    : frightened
+      ? '#2449d8'
+      : GHOST_COLORS[personality]
+
+  return (
+    <group ref={modelRef}>
+      <group visible={!eyesOnly}>
+        <mesh castShadow position-y={0.08}>
+          <sphereGeometry args={[0.34, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          <meshStandardMaterial
+            color={bodyColor}
+            emissive={bodyColor}
+            emissiveIntensity={frightened ? (warning ? 0.38 : 0.7) : 0.28}
+            roughness={0.42}
+          />
+        </mesh>
+        <mesh castShadow position-y={-0.11}>
+          <cylinderGeometry args={[0.34, 0.36, 0.4, 24]} />
+          <meshStandardMaterial
+            color={bodyColor}
+            emissive={bodyColor}
+            emissiveIntensity={frightened ? (warning ? 0.38 : 0.7) : 0.28}
+            roughness={0.42}
+          />
+        </mesh>
+        {[-0.23, 0, 0.23].map((x) => (
+          <mesh key={x} position={[x, -0.32, 0]}>
+            <sphereGeometry args={[0.135, 14, 9]} />
+            <meshStandardMaterial
+              color={bodyColor}
+              emissive={bodyColor}
+              emissiveIntensity={frightened ? (warning ? 0.38 : 0.7) : 0.28}
+            />
+          </mesh>
+        ))}
+      </group>
+
+      {[-0.13, 0.13].map((x) => (
+        <group key={x} position={[x, 0.07, 0.285]}>
+          <mesh scale={[0.82, 1, 0.55]}>
+            <sphereGeometry args={[0.105, 14, 10]} />
+            <meshBasicMaterial color={frightened && !warning ? '#f4f7ff' : '#ffffff'} />
+          </mesh>
+          <mesh position-z={0.067} scale={[0.8, 1, 0.5]}>
+            <sphereGeometry args={[0.05, 10, 8]} />
+            <meshBasicMaterial
+              color={frightened ? (warning ? '#2449d8' : '#ffb9cf') : '#172761'}
+            />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  )
+}
+
 type GhostProps = {
   id: string
   personality: GhostPersonality
   spawnIndex: number
+  level: LevelConfig
 }
 
-export function Ghost({ id, personality, spawnIndex }: GhostProps) {
+export function Ghost({ id, personality, spawnIndex, level }: GhostProps) {
   const roundId = useGameStore((state) => state.roundId)
   const [visualState, setVisualState] = useState<GhostState>('SCATTER')
+  const [frightenedVisual, setFrightenedVisual] =
+    useState<FrightenedVisualState>('NORMAL')
   const rootRef = useRef<THREE.Group>(null)
+  const wrappedRootRef = useRef<THREE.Group>(null)
   const modelRef = useRef<THREE.Group>(null)
-  const spawn = useMemo(() => findCells('G')[spawnIndex], [spawnIndex])
+  const wrappedModelRef = useRef<THREE.Group>(null)
+  const spawn = useMemo(() => findCells('G', level)[spawnIndex], [level, spawnIndex])
   const currentTile = useRef<GridPosition>({ ...spawn })
-  const targetTile = useRef<GridPosition>({ ...spawn })
+  const activeMove = useRef<ResolvedMove | null>(null)
   const direction = useRef<Direction>(spawnIndex % 2 === 0 ? 'LEFT' : 'RIGHT')
   const progress = useRef(0)
+  const activeRoundId = useRef(roundId)
   const activeSeconds = useRef(0)
   const stateRef = useRef<GhostState>('SCATTER')
+  const frightenedVisualRef = useRef<FrightenedVisualState>('NORMAL')
   const mayReverse = useRef(false)
   const eaten = useRef(false)
   const bobTime = useRef(spawnIndex * 0.7)
 
   useLayoutEffect(() => {
     currentTile.current = { ...spawn }
-    targetTile.current = { ...spawn }
+    activeMove.current = null
     direction.current = spawnIndex % 2 === 0 ? 'LEFT' : 'RIGHT'
     progress.current = 0
+    activeRoundId.current = roundId
     activeSeconds.current = 0
     stateRef.current = 'SCATTER'
+    frightenedVisualRef.current = 'NORMAL'
     mayReverse.current = false
     eaten.current = false
-    // A new round must also reset rendering state left by FRIGHTENED/EATEN.
+    bobTime.current = spawnIndex * 0.7
+    // A new round resets both gameplay and the low-frequency render state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setVisualState('SCATTER')
-    const [x, , z] = gridToWorld(spawn)
+    setFrightenedVisual('NORMAL')
+    const [x, , z] = gridToActorWorld(spawn, level)
     rootRef.current?.position.set(x, 0.48, z)
+    wrappedRootRef.current?.position.set(x, 0.48, z)
+    if (wrappedRootRef.current) wrappedRootRef.current.visible = false
+    for (const model of [modelRef.current, wrappedModelRef.current]) {
+      model?.position.set(0, 0, 0)
+      model?.rotation.set(0, 0, 0)
+    }
     ghostTiles.set(id, { ...spawn })
-  }, [id, roundId, spawn, spawnIndex])
+  }, [id, level, roundId, spawn, spawnIndex])
 
   useFrame((_, delta) => {
     const root = rootRef.current
-    if (!root) return
+    const wrappedRoot = wrappedRootRef.current
+    if (!root || !wrappedRoot) return
+
     const frameDelta = Math.min(delta, 0.05)
     const store = useGameStore.getState()
-    if (store.status !== 'playing') return
+    if (store.status !== 'playing' || store.roundId !== activeRoundId.current) return
     const now = performance.now()
 
     activeSeconds.current += frameDelta
@@ -99,6 +206,34 @@ export function Ghost({ id, personality, spawnIndex }: GhostProps) {
       setVisualState(nextState)
     }
 
+    const nextFrightenedVisual =
+      nextState === 'FRIGHTENED'
+        ? getFrightenedVisualState(store.frightenedUntil - now)
+        : 'NORMAL'
+    if (nextFrightenedVisual !== frightenedVisualRef.current) {
+      frightenedVisualRef.current = nextFrightenedVisual
+      setFrightenedVisual(nextFrightenedVisual)
+    }
+
+    bobTime.current += frameDelta
+    for (const model of [modelRef.current, wrappedModelRef.current]) {
+      if (!model) continue
+      model.position.y = Math.sin(bobTime.current * 7) * 0.035
+      model.rotation.z = Math.sin(bobTime.current * 5) * 0.035
+    }
+
+    if (
+      !shouldGhostMove(
+        personality,
+        activeSeconds.current * 1_000,
+        nextState,
+        level,
+      )
+    ) {
+      wrappedRoot.visible = false
+      return
+    }
+
     if (progress.current === 0) {
       const playerTile = store.playerTile
       const redTile = ghostTiles.get('red') ?? playerTile
@@ -113,6 +248,7 @@ export function Ghost({ id, personality, spawnIndex }: GhostProps) {
                 store.direction,
                 redTile,
                 currentTile.current,
+                level,
               )
 
       direction.current = chooseGhostDirection({
@@ -121,35 +257,55 @@ export function Ghost({ id, personality, spawnIndex }: GhostProps) {
         target,
         state: nextState,
         mayReverse: mayReverse.current,
+        level,
       })
       mayReverse.current = false
-      targetTile.current = nextTile(currentTile.current, direction.current)
+      activeMove.current = resolveMove(currentTile.current, direction.current, level)
     }
+
+    const move = activeMove.current
+    if (!move) return
 
     const speed =
       nextState === 'EATEN'
         ? EATEN_GHOST_SPEED
         : nextState === 'FRIGHTENED'
-          ? FRIGHTENED_GHOST_SPEED
-          : GHOST_SPEED
+          ? FRIGHTENED_GHOST_SPEED * level.ghostSpeedMultiplier
+          : GHOST_SPEED * level.ghostSpeedMultiplier
     progress.current = Math.min(1, progress.current + speed * frameDelta)
 
-    const from = gridToWorld(currentTile.current)
-    const to = gridToWorld(targetTile.current)
-    root.position.x = THREE.MathUtils.lerp(from[0], to[0], progress.current)
-    root.position.z = THREE.MathUtils.lerp(from[2], to[2], progress.current)
+    const interpolated = interpolateMove(move, progress.current, level)
+    root.position.set(
+      interpolated.position[0],
+      interpolated.position[1] + 0.48,
+      interpolated.position[2],
+    )
+    if (interpolated.wrappedPosition) {
+      wrappedRoot.visible = true
+      wrappedRoot.position.set(
+        interpolated.wrappedPosition[0],
+        interpolated.wrappedPosition[1] + 0.48,
+        interpolated.wrappedPosition[2],
+      )
+    } else {
+      wrappedRoot.visible = false
+    }
 
-    if (modelRef.current) {
-      modelRef.current.rotation.y = GHOST_YAW[direction.current as Exclude<Direction, 'NONE'>]
-      bobTime.current += frameDelta
-      modelRef.current.position.y = Math.sin(bobTime.current * 7) * 0.035
-      modelRef.current.rotation.z = Math.sin(bobTime.current * 5) * 0.035
+    for (const model of [modelRef.current, wrappedModelRef.current]) {
+      if (model) {
+        model.rotation.y =
+          GHOST_YAW[direction.current as Exclude<Direction, 'NONE'>]
+      }
     }
 
     if (progress.current >= 1) {
-      currentTile.current = { ...targetTile.current }
+      currentTile.current = { ...move.to }
       ghostTiles.set(id, currentTile.current)
+      activeMove.current = null
       progress.current = 0
+      const [x, , z] = gridToActorWorld(currentTile.current, level)
+      root.position.set(x, 0.48, z)
+      wrappedRoot.visible = false
 
       if (eaten.current && positionsEqual(currentTile.current, spawn)) {
         eaten.current = false
@@ -159,15 +315,21 @@ export function Ghost({ id, personality, spawnIndex }: GhostProps) {
       }
     }
 
+    const collisionPosition =
+      wrappedRoot.visible && progress.current >= 0.5
+        ? wrappedRoot.position
+        : root.position
     if (
       !eaten.current &&
       now >= store.invulnerableUntil &&
-      actorsCollide(root.position, playerWorldPosition)
+      actorsCollide(collisionPosition, playerWorldPosition)
     ) {
       if (nextState === 'FRIGHTENED') {
         eaten.current = true
         stateRef.current = 'EATEN'
         setVisualState('EATEN')
+        frightenedVisualRef.current = 'NORMAL'
+        setFrightenedVisual('NORMAL')
         mayReverse.current = true
         store.eatGhost()
       } else {
@@ -176,56 +338,23 @@ export function Ghost({ id, personality, spawnIndex }: GhostProps) {
     }
   })
 
-  const frightened = visualState === 'FRIGHTENED'
-  const eyesOnly = visualState === 'EATEN'
-  const bodyColor = frightened ? '#2449d8' : GHOST_COLORS[personality]
-
   return (
-    <group ref={rootRef}>
-      <group ref={modelRef}>
-        <group visible={!eyesOnly}>
-          <mesh castShadow position-y={0.08}>
-            <sphereGeometry args={[0.34, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
-            <meshStandardMaterial
-              color={bodyColor}
-              emissive={bodyColor}
-              emissiveIntensity={frightened ? 0.7 : 0.28}
-              roughness={0.42}
-            />
-          </mesh>
-          <mesh castShadow position-y={-0.11}>
-            <cylinderGeometry args={[0.34, 0.36, 0.4, 24]} />
-            <meshStandardMaterial
-              color={bodyColor}
-              emissive={bodyColor}
-              emissiveIntensity={frightened ? 0.7 : 0.28}
-              roughness={0.42}
-            />
-          </mesh>
-          {[-0.23, 0, 0.23].map((x) => (
-            <mesh key={x} position={[x, -0.32, 0]}>
-              <sphereGeometry args={[0.135, 14, 9]} />
-              <meshStandardMaterial
-                color={bodyColor}
-                emissive={bodyColor}
-                emissiveIntensity={frightened ? 0.7 : 0.28}
-              />
-            </mesh>
-          ))}
-        </group>
-
-        {[-0.13, 0.13].map((x) => (
-          <group key={x} position={[x, 0.07, 0.285]}>
-            <mesh scale={[0.82, 1, 0.55]}>
-              <sphereGeometry args={[0.105, 14, 10]} />
-              <meshBasicMaterial color={frightened ? '#f4f7ff' : '#ffffff'} />
-            </mesh>
-            <mesh position-z={0.067} scale={[0.8, 1, 0.5]}>
-              <sphereGeometry args={[0.05, 10, 8]} />
-              <meshBasicMaterial color={frightened ? '#ffb9cf' : '#172761'} />
-            </mesh>
-          </group>
-        ))}
+    <group>
+      <group ref={rootRef}>
+        <GhostModel
+          personality={personality}
+          modelRef={modelRef}
+          visualState={visualState}
+          frightenedVisual={frightenedVisual}
+        />
+      </group>
+      <group ref={wrappedRootRef} visible={false}>
+        <GhostModel
+          personality={personality}
+          modelRef={wrappedModelRef}
+          visualState={visualState}
+          frightenedVisual={frightenedVisual}
+        />
       </group>
     </group>
   )

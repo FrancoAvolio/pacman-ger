@@ -4,8 +4,22 @@ import { audio, type AudioCue } from './audio'
 describe('game audio', () => {
   it('stays safe when Web Audio is unavailable', () => {
     vi.stubGlobal('AudioContext', undefined)
+    audio.setMuted(false)
     expect(() => audio.unlock()).not.toThrow()
     expect(() => audio.play('pellet')).not.toThrow()
+  })
+
+  it('tracks mute state and suppresses playback while muted', () => {
+    const AudioContextMock = vi.fn()
+    vi.stubGlobal('AudioContext', AudioContextMock)
+
+    audio.setMuted(true)
+    expect(audio.isMuted()).toBe(true)
+    expect(() => audio.play('ticketCollect')).not.toThrow()
+    expect(AudioContextMock).not.toHaveBeenCalled()
+
+    audio.setMuted(false)
+    expect(audio.isMuted()).toBe(false)
   })
 
   it('unlocks the context and synthesizes every cue', () => {
@@ -67,7 +81,16 @@ describe('game audio', () => {
 
     vi.stubGlobal('AudioContext', FakeAudioContext)
     audio.unlock()
-    const cues: AudioCue[] = ['pellet', 'power', 'ghostEaten', 'death', 'levelComplete']
+    const cues: AudioCue[] = [
+      'pellet',
+      'power',
+      'ghostEaten',
+      'death',
+      'ticketSpawn',
+      'ticketCollect',
+      'levelComplete',
+      'gameComplete',
+    ]
     cues.forEach((cue) => audio.play(cue))
 
     expect(oscillators).toHaveLength(cues.length)
@@ -76,5 +99,7 @@ describe('game audio', () => {
     expect(oscillators.every((oscillator) => oscillator.stop.mock.calls.length === 1)).toBe(true)
     expect(oscillators[3].type).toBe('sawtooth')
     expect(oscillators[0].type).toBe('square')
+    expect(oscillators[4].type).toBe('sine')
+    expect(oscillators.slice(5).every((oscillator) => oscillator.type === 'triangle')).toBe(true)
   })
 })

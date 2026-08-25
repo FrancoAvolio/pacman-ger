@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
+import { getLevelConfig, LEVELS } from './levels'
+import { isWalkable } from './maze'
 import { canMove } from './movement'
 import {
   chooseGhostDirection,
+  getFrightenedVisualState,
   getGhostTarget,
+  isGhostReleased,
   SCATTER_TARGETS,
   scheduledGhostState,
+  shortestPathDistance,
+  shouldGhostMove,
 } from './ghostAI'
 
 describe('ghost AI', () => {
@@ -67,5 +73,66 @@ describe('ghost AI', () => {
       mayReverse: true,
     })
     expect(canMove(tile, direction)).toBe(true)
+  })
+
+  it('uses tunnel-aware graph distance instead of screen-space distance', () => {
+    const level = getLevelConfig(3)
+
+    expect(shortestPathDistance({ row: 10, col: 0 }, { row: 10, col: 20 }, level)).toBe(1)
+    expect(
+      chooseGhostDirection({
+        tile: { row: 10, col: 2 },
+        currentDirection: 'NONE',
+        target: { row: 10, col: 19 },
+        state: 'CHASE',
+        mayReverse: true,
+        level,
+      }),
+    ).toBe('LEFT')
+
+    expect(
+      getGhostTarget(
+        'PINK',
+        { row: 10, col: 0 },
+        'LEFT',
+        { row: 10, col: 10 },
+        { row: 10, col: 10 },
+        level,
+      ),
+    ).toEqual({ row: 10, col: 17 })
+  })
+
+  it('uses walkable scatter targets in every level', () => {
+    for (const level of LEVELS) {
+      for (const target of Object.values(SCATTER_TARGETS)) {
+        expect(isWalkable(target, level)).toBe(true)
+      }
+    }
+  })
+
+  it('releases ghosts at configurable staggered boundaries', () => {
+    const level = getLevelConfig(2)
+
+    expect(isGhostReleased('RED', 0, level)).toBe(true)
+    expect(isGhostReleased('PINK', 1_499, level)).toBe(false)
+    expect(isGhostReleased('PINK', 1_500, level)).toBe(true)
+    expect(isGhostReleased('CYAN', 2_999, level)).toBe(false)
+    expect(isGhostReleased('CYAN', 3_000, level)).toBe(true)
+    expect(isGhostReleased('ORANGE', 4_999, level)).toBe(false)
+    expect(isGhostReleased('ORANGE', 5_000, level)).toBe(true)
+    expect(shouldGhostMove('ORANGE', 0, 'FRIGHTENED', level)).toBe(false)
+    expect(shouldGhostMove('ORANGE', 0, 'EATEN', level)).toBe(true)
+  })
+
+  it('flashes blue and white faster during the final frightened second', () => {
+    expect(getFrightenedVisualState(2_001)).toBe('BLUE')
+    expect(getFrightenedVisualState(2_000)).toBe('BLUE')
+    expect(getFrightenedVisualState(1_750)).toBe('WHITE')
+    expect(getFrightenedVisualState(1_500)).toBe('BLUE')
+    expect(getFrightenedVisualState(1_001)).toBe('WHITE')
+    expect(getFrightenedVisualState(1_000)).toBe('BLUE')
+    expect(getFrightenedVisualState(875)).toBe('WHITE')
+    expect(getFrightenedVisualState(750)).toBe('BLUE')
+    expect(getFrightenedVisualState(0)).toBe('NORMAL')
   })
 })

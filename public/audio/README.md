@@ -5,4 +5,5 @@ break the build. To use custom sounds, place them in this folder and map their
 public URLs (for example `/audio/pellet.mp3`) in `src/game/audio.ts` under
 `CUSTOM_AUDIO`.
 
-Supported cues: `pellet`, `power`, `ghostEaten`, `death`, and `levelComplete`.
+Supported cues: `pellet`, `power`, `ghostEaten`, `death`, `ticketSpawn`,
+`ticketCollect`, `levelComplete`, and `gameComplete`.
