@@ -13,8 +13,15 @@ describe('StartScreen', () => {
     render(<StartScreen />)
     expect(screen.getByRole('heading', { name: 'READY, GERAL?' })).toBeVisible()
     expect(screen.getByText('Una partida para vos.')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'ELEGÍ TU SUFRIMIENTO' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'NORMAL' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await user.click(screen.getByRole('button', { name: 'TRANQUI' }))
+    expect(useGameStore.getState()).toMatchObject({ difficulty: 'tranqui', lives: 5 })
     await user.click(screen.getByRole('button', { name: 'Empezar partida' }))
-    expect(useGameStore.getState().status).toBe('playing')
+    expect(useGameStore.getState()).toMatchObject({ status: 'playing', lives: 5 })
     expect(screen.queryByRole('heading', { name: 'READY, GERAL?' })).not.toBeInTheDocument()
   })
 

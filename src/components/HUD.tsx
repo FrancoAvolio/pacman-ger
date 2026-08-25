@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { getDifficultyConfig } from '../game/difficulty'
 import { useGameStore } from '../store/gameStore'
 
 const LEVEL_TRANSITION_MS = 1_450
@@ -12,11 +13,13 @@ export function HUD() {
   const highScore = useGameStore((state) => state.highScore)
   const lives = useGameStore((state) => state.lives)
   const level = useGameStore((state) => state.level)
+  const difficulty = useGameStore((state) => state.difficulty)
   const status = useGameStore((state) => state.status)
   const muted = useGameStore((state) => state.muted)
   const ticketPhase = useGameStore((state) => state.ticketPhase)
   const ticketCollectionId = useGameStore((state) => state.ticketCollectionId)
   const newGame = useGameStore((state) => state.newGame)
+  const returnToMenu = useGameStore((state) => state.returnToMenu)
   const beginLevel = useGameStore((state) => state.beginLevel)
   const togglePause = useGameStore((state) => state.togglePause)
   const toggleMute = useGameStore((state) => state.toggleMute)
@@ -41,7 +44,8 @@ export function HUD() {
           <strong>{formatScore(highScore)}</strong>
         </div>
         <div className="hud-level" aria-label={`Nivel ${level}`}>
-          Level {level}
+          <span>Level {level}</span>
+          <small>· {getDifficultyConfig(difficulty).label}</small>
         </div>
         <div className="hud-stat hud-stat--lives">
           <span>Lives</span>
@@ -79,6 +83,9 @@ export function HUD() {
             </button>
             <button type="button" className="button-secondary" onClick={newGame}>
               Reiniciar
+            </button>
+            <button type="button" className="button-secondary" onClick={returnToMenu}>
+              Volver al menú
             </button>
           </div>
         </section>

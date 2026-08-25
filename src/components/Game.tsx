@@ -12,8 +12,10 @@ import { TrainEasterEgg } from './TrainEasterEgg'
 import { BonusTicket } from './BonusTicket'
 import { getLevelConfig, type LevelConfig } from '../game/levels'
 import { useKeyboardControls } from '../hooks/useKeyboardControls'
+import { useDevControls } from '../hooks/useDevControls'
 import { useSwipeControls } from '../hooks/useSwipeControls'
 import { useGameStore } from '../store/gameStore'
+import { DevOverlay } from './DevOverlay'
 
 function GameScene({ level }: { level: LevelConfig }) {
   return (
@@ -55,6 +57,7 @@ function GameScene({ level }: { level: LevelConfig }) {
 }
 
 export function Game() {
+  useDevControls()
   useKeyboardControls()
   const inputSurfaceRef = useRef<HTMLDivElement>(null)
   const levelNumber = useGameStore((state) => state.level)
@@ -69,6 +72,7 @@ export function Game() {
         <small>P para pausar</small>
       </div>
       <HUD />
+      <DevOverlay />
       <StartScreen />
       <div ref={inputSurfaceRef} className="game-input-surface">
         <Canvas

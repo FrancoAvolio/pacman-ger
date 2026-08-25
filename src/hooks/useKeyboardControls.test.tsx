@@ -23,6 +23,15 @@ describe('keyboard controls', () => {
     expect(useGameStore.getState().queuedDirection).toBe('RIGHT')
   })
 
+  it('cycles difficulty with horizontal arrows before a game starts', () => {
+    render(<KeyboardHarness />)
+    useGameStore.setState({ status: 'ready', difficulty: 'normal', lives: 3 })
+    fireEvent.keyDown(window, { code: 'ArrowLeft' })
+    expect(useGameStore.getState()).toMatchObject({ difficulty: 'tranqui', lives: 5 })
+    fireEvent.keyDown(window, { code: 'ArrowRight' })
+    expect(useGameStore.getState()).toMatchObject({ difficulty: 'normal', lives: 3 })
+  })
+
   it('continues a prepared level with Space', () => {
     render(<KeyboardHarness />)
     useGameStore.setState({ status: 'level-ready', level: 2 })

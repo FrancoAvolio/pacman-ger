@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../store/gameStore";
 import { HUD } from "./HUD";
+import { StartScreen } from "./StartScreen";
 
 describe("HUD", () => {
   it("renders score, high score, lives, level, and audio control", () => {
@@ -53,6 +54,27 @@ describe("HUD", () => {
       score: 0,
       lives: 3,
     });
+  });
+
+  it("returns to the difficulty menu from pause", async () => {
+    const user = userEvent.setup();
+    useGameStore.setState({ status: "paused", level: 2, score: 850 });
+    render(
+      <>
+        <HUD />
+        <StartScreen />
+      </>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Volver al menú" }));
+    expect(useGameStore.getState()).toMatchObject({
+      status: "ready",
+      level: 1,
+      score: 0,
+    });
+    expect(
+      screen.getByRole("heading", { name: "ELEGÍ TU SUFRIMIENTO" }),
+    ).toBeVisible();
   });
 
   it("shows the completed level briefly and automatically prepares the next one", () => {

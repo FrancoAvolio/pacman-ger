@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import { RESPAWN_GRACE_MS } from '../game/constants'
 import {
+  cycleDifficulty as cycleDifficultyValue,
+  DEFAULT_DIFFICULTY,
+  getEffectiveFrightenedDuration,
+  getStartingLives,
+} from '../game/difficulty'
+import { DEV_MODE } from '../game/dev'
+import {
   canCollectTicket,
   getTicketExpiry,
   isTicketExpired,
@@ -15,9 +22,7 @@ import {
   type LevelNumber,
 } from '../game/levels'
 import { cellAt, getInitialPellets, getPlayerSpawn, tileKey } from '../game/maze'
-import type { Direction, GameStatus, GridPosition } from '../game/types'
-
-const STARTING_LIVES = 3
+import type { Difficulty, Direction, GameStatus, GridPosition } from '../game/types'
 
 function readHighScore(): number {
   try {
@@ -54,6 +59,7 @@ type GameStore = {
   score: number
   highScore: number
   lives: number
+  difficulty: Difficulty
   remainingPellets: Set<string>
   pelletsEaten: number
   frightenedUntil: number
@@ -68,6 +74,10 @@ type GameStore = {
   ticketExpiresAt: number
   ticketCollectionId: number
   muted: boolean
+  devInvulnerable: boolean
+  devDebug: boolean
+  setDifficulty: (difficulty: Difficulty) => void
+  cycleDifficulty: (direction: 'next' | 'previous') => void
   queueDirection: (direction: Direction) => void
   setDirection: (direction: Direction) => void
   setPlayerTile: (position: GridPosition) => void
@@ -83,7 +93,12 @@ type GameStore = {
   toggleMute: () => void
   startGame: () => void
   newGame: () => void
+  returnToMenu: () => void
   resetPlayer: () => void
+  devLoadLevel: (level: LevelNumber) => void
+  devReloadLevel: () => void
+  toggleDevInvulnerable: () => void
+  toggleDevDebug: () => void
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -92,7 +107,8 @@ export const useGameStore = create<GameStore>((set) => ({
   status: 'ready',
   score: 0,
   highScore: readHighScore(),
-  lives: STARTING_LIVES,
+  lives: getStartingLives(DEFAULT_DIFFICULTY),
+  difficulty: DEFAULT_DIFFICULTY,
   remainingPellets: getInitialPellets(DEFAULT_LEVEL.maze),
   pelletsEaten: 0,
   frightenedUntil: 0,
@@ -107,6 +123,22 @@ export const useGameStore = create<GameStore>((set) => ({
   ticketExpiresAt: 0,
   ticketCollectionId: 0,
   muted: initialMuted,
+  devInvulnerable: false,
+  devDebug: false,
+
+  setDifficulty: (difficulty) =>
+    set((state) =>
+      state.status === 'ready'
+        ? { difficulty, lives: getStartingLives(difficulty) }
+        : state,
+    ),
+
+  cycleDifficulty: (direction) =>
+    set((state) => {
+      if (state.status !== 'ready') return state
+      const difficulty = cycleDifficultyValue(state.difficulty, direction)
+      return { difficulty, lives: getStartingLives(difficulty) }
+    }),
 
   queueDirection: (queuedDirection) => set({ queuedDirection }),
   setDirection: (direction) => set({ direction }),
@@ -147,7 +179,9 @@ export const useGameStore = create<GameStore>((set) => ({
         score,
         highScore,
         frightenedUntil:
-          cell === 'o' ? now + level.frightenedDurationMs : state.frightenedUntil,
+          cell === 'o'
+            ? now + getEffectiveFrightenedDuration(level, state.difficulty)
+            : state.frightenedUntil,
         ghostCombo: cell === 'o' ? 0 : state.ghostCombo,
         ticketPhase: spawnTicket ? 'visible' : state.ticketPhase,
         ticketExpiresAt: spawnTicket
@@ -215,7 +249,8 @@ export const useGameStore = create<GameStore>((set) => ({
     set((state) => {
       if (
         state.status !== 'playing' ||
-        performance.now() < state.invulnerableUntil
+        performance.now() < state.invulnerableUntil ||
+        (DEV_MODE && state.devInvulnerable)
       ) {
         return state
       }
@@ -318,7 +353,11 @@ export const useGameStore = create<GameStore>((set) => ({
 
   startGame: () => {
     audio.unlock()
-    set((state) => (state.status === 'ready' ? { status: 'playing' } : state))
+    set((state) =>
+      state.status === 'ready'
+        ? { status: 'playing', lives: getStartingLives(state.difficulty) }
+        : state,
+    )
   },
 
   newGame: () => {
@@ -328,7 +367,7 @@ export const useGameStore = create<GameStore>((set) => ({
       level: DEFAULT_LEVEL.id,
       status: 'playing',
       score: 0,
-      lives: STARTING_LIVES,
+      lives: getStartingLives(state.difficulty),
       remainingPellets: getInitialPellets(DEFAULT_LEVEL.maze),
       pelletsEaten: 0,
       frightenedUntil: 0,
@@ -345,6 +384,30 @@ export const useGameStore = create<GameStore>((set) => ({
     }))
   },
 
+  returnToMenu: () =>
+    set((state) => ({
+      roundId: state.roundId + 1,
+      level: DEFAULT_LEVEL.id,
+      status: 'ready',
+      score: 0,
+      lives: getStartingLives(state.difficulty),
+      remainingPellets: getInitialPellets(DEFAULT_LEVEL.maze),
+      pelletsEaten: 0,
+      frightenedUntil: 0,
+      invulnerableUntil: 0,
+      ghostCombo: 0,
+      pausedAt: null,
+      cameraPunch: 0,
+      direction: 'NONE',
+      queuedDirection: 'NONE',
+      playerTile: getPlayerSpawn(DEFAULT_LEVEL.maze),
+      ticketPhase: 'waiting',
+      ticketExpiresAt: 0,
+      ticketCollectionId: 0,
+      devInvulnerable: false,
+      devDebug: false,
+    })),
+
   resetPlayer: () =>
     set((state) => {
       const level = getLevelConfig(state.level)
@@ -354,4 +417,61 @@ export const useGameStore = create<GameStore>((set) => ({
         playerTile: getPlayerSpawn(level.maze),
       }
     }),
+
+  devLoadLevel: (level) => {
+    if (!DEV_MODE) return
+    set((state) => {
+      const config = getLevelConfig(level)
+      return {
+        roundId: state.roundId + 1,
+        level,
+        status: 'playing',
+        remainingPellets: getInitialPellets(config.maze),
+        pelletsEaten: 0,
+        frightenedUntil: 0,
+        invulnerableUntil: 0,
+        ghostCombo: 0,
+        pausedAt: null,
+        cameraPunch: 0,
+        direction: 'NONE',
+        queuedDirection: 'NONE',
+        playerTile: getPlayerSpawn(config.maze),
+        ticketPhase: 'waiting',
+        ticketExpiresAt: 0,
+      }
+    })
+  },
+
+  devReloadLevel: () => {
+    if (!DEV_MODE) return
+    set((state) => {
+      const config = getLevelConfig(state.level)
+      return {
+        roundId: state.roundId + 1,
+        status: 'playing',
+        remainingPellets: getInitialPellets(config.maze),
+        pelletsEaten: 0,
+        frightenedUntil: 0,
+        invulnerableUntil: 0,
+        ghostCombo: 0,
+        pausedAt: null,
+        cameraPunch: 0,
+        direction: 'NONE',
+        queuedDirection: 'NONE',
+        playerTile: getPlayerSpawn(config.maze),
+        ticketPhase: 'waiting',
+        ticketExpiresAt: 0,
+      }
+    })
+  },
+
+  toggleDevInvulnerable: () => {
+    if (!DEV_MODE) return
+    set((state) => ({ devInvulnerable: !state.devInvulnerable }))
+  },
+
+  toggleDevDebug: () => {
+    if (!DEV_MODE) return
+    set((state) => ({ devDebug: !state.devDebug }))
+  },
 }))

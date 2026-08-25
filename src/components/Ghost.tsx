@@ -13,6 +13,8 @@ import {
   FRIGHTENED_GHOST_SPEED,
   GHOST_SPEED,
 } from '../game/constants'
+import { getEffectiveGhostSpeed } from '../game/difficulty'
+import { DEV_MODE } from '../game/dev'
 import {
   chooseGhostDirection,
   getFrightenedVisualState,
@@ -228,6 +230,7 @@ export function Ghost({ id, personality, spawnIndex, level }: GhostProps) {
         activeSeconds.current * 1_000,
         nextState,
         level,
+        store.difficulty,
       )
     ) {
       wrappedRoot.visible = false
@@ -270,8 +273,8 @@ export function Ghost({ id, personality, spawnIndex, level }: GhostProps) {
       nextState === 'EATEN'
         ? EATEN_GHOST_SPEED
         : nextState === 'FRIGHTENED'
-          ? FRIGHTENED_GHOST_SPEED * level.ghostSpeedMultiplier
-          : GHOST_SPEED * level.ghostSpeedMultiplier
+          ? getEffectiveGhostSpeed(FRIGHTENED_GHOST_SPEED, level, store.difficulty)
+          : getEffectiveGhostSpeed(GHOST_SPEED, level, store.difficulty)
     progress.current = Math.min(1, progress.current + speed * frameDelta)
 
     const interpolated = interpolateMove(move, progress.current, level)
@@ -332,7 +335,7 @@ export function Ghost({ id, personality, spawnIndex, level }: GhostProps) {
         setFrightenedVisual('NORMAL')
         mayReverse.current = true
         store.eatGhost()
-      } else {
+      } else if (!(DEV_MODE && store.devInvulnerable)) {
         store.playerHit()
       }
     }

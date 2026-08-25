@@ -20,3 +20,5 @@ export type GameStatus =
 export type GhostState = 'CHASE' | 'SCATTER' | 'FRIGHTENED' | 'EATEN'
 
 export type GhostPersonality = 'RED' | 'PINK' | 'CYAN' | 'ORANGE'
+
+export type Difficulty = 'tranqui' | 'normal' | 'arcade'

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { audio } from '../game/audio'
 import { RESPAWN_GRACE_MS } from '../game/constants'
+import { DEV_MODE } from '../game/dev'
 import { DEFAULT_LEVEL, FINAL_LEVEL, getLevelConfig, type LevelNumber } from '../game/levels'
 import { cellAt, findCells, getInitialPellets, tileKey } from '../game/maze'
 import { useGameStore } from './gameStore'
@@ -377,5 +378,107 @@ describe('game store', () => {
       queuedDirection: 'NONE',
       playerTile: { row: 11, col: 10 },
     })
+  })
+
+  it('keeps the selected difficulty through deaths and level progression', () => {
+    useGameStore.setState({ status: 'ready' })
+    useGameStore.getState().setDifficulty('tranqui')
+    expect(useGameStore.getState()).toMatchObject({ difficulty: 'tranqui', lives: 5 })
+
+    useGameStore.getState().startGame()
+    expect(useGameStore.getState().lives).toBe(5)
+    useGameStore.getState().playerHit()
+    expect(useGameStore.getState().difficulty).toBe('tranqui')
+    useGameStore.getState().finishDeath()
+    expect(useGameStore.getState().difficulty).toBe('tranqui')
+
+    const finalPellet = leaveOnlyFinalPellet(1)
+    useGameStore.getState().collectPellet(finalPellet)
+    useGameStore.getState().finishLevelTransition()
+    expect(useGameStore.getState()).toMatchObject({
+      level: 2,
+      difficulty: 'tranqui',
+      lives: 4,
+    })
+  })
+
+  it('uses the selected difficulty lives when starting a new campaign', () => {
+    useGameStore.setState({ status: 'ready' })
+    useGameStore.getState().setDifficulty('tranqui')
+    useGameStore.getState().newGame()
+    expect(useGameStore.getState()).toMatchObject({
+      level: 1,
+      status: 'playing',
+      difficulty: 'tranqui',
+      lives: 5,
+    })
+
+    useGameStore.setState({ status: 'game-over', lives: 0 })
+    useGameStore.getState().newGame()
+    expect(useGameStore.getState()).toMatchObject({ difficulty: 'tranqui', lives: 5 })
+  })
+
+  it('returns from pause to the difficulty menu with a clean campaign', () => {
+    useGameStore.setState({
+      status: 'paused',
+      level: 3,
+      difficulty: 'tranqui',
+      score: 1_240,
+      lives: 2,
+      devInvulnerable: true,
+      devDebug: true,
+    })
+    const previousRound = useGameStore.getState().roundId
+
+    useGameStore.getState().returnToMenu()
+
+    expect(useGameStore.getState()).toMatchObject({
+      status: 'ready',
+      level: 1,
+      difficulty: 'tranqui',
+      score: 0,
+      lives: 5,
+      pausedAt: null,
+      devInvulnerable: false,
+      devDebug: false,
+      roundId: previousRound + 1,
+    })
+    expect(useGameStore.getState().remainingPellets.size).toBe(
+      getInitialPellets(DEFAULT_LEVEL.maze).size,
+    )
+  })
+
+  it('jumps between clean levels in development while preserving campaign stats', () => {
+    useGameStore.setState({ status: 'playing', difficulty: 'arcade', score: 900, lives: 2 })
+    useGameStore.getState().devLoadLevel(3)
+    if (!DEV_MODE) {
+      expect(useGameStore.getState().level).toBe(1)
+      return
+    }
+    expect(useGameStore.getState()).toMatchObject({
+      level: 3,
+      status: 'playing',
+      difficulty: 'arcade',
+      score: 900,
+      lives: 2,
+      pelletsEaten: 0,
+      ticketPhase: 'waiting',
+    })
+    expect(useGameStore.getState().remainingPellets.size).toBe(
+      getInitialPellets(getLevelConfig(3).maze).size,
+    )
+  })
+
+  it('keeps the player safe in dev mode without disabling ghost rewards', () => {
+    useGameStore.setState({ status: 'playing', devInvulnerable: true, lives: 3 })
+    useGameStore.getState().playerHit()
+    if (!DEV_MODE) {
+      expect(useGameStore.getState()).toMatchObject({ status: 'playing', lives: 3 })
+      return
+    }
+    expect(useGameStore.getState()).toMatchObject({ status: 'playing', lives: 3 })
+
+    useGameStore.getState().eatGhost()
+    expect(useGameStore.getState().score).toBe(200)
   })
 })

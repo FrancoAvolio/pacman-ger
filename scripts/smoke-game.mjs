@@ -55,7 +55,14 @@ try {
 
   await desktopPage.goto(gameUrl, { waitUntil: 'networkidle' })
   await desktopPage.getByText('Level 1', { exact: true }).waitFor({ state: 'visible' })
+  const normalDifficulty = desktopPage.getByRole('button', { name: 'NORMAL' })
+  await normalDifficulty.waitFor({ state: 'visible' })
+  if ((await normalDifficulty.getAttribute('aria-pressed')) !== 'true') {
+    throw new Error('NORMAL is not the default difficulty')
+  }
+  await desktopPage.getByRole('button', { name: 'TRANQUI' }).click()
   await desktopPage.getByRole('button', { name: 'Empezar partida' }).click()
+  await desktopPage.getByLabel('5 vidas').waitFor({ state: 'visible' })
   await desktopPage.keyboard.press('ArrowLeft')
   await desktopPage.waitForTimeout(950)
 
@@ -69,6 +76,11 @@ try {
   await desktopPage.keyboard.press('p')
   await desktopPage.getByRole('heading', { name: 'PAUSA' }).waitFor({ state: 'hidden' })
 
+  await desktopPage.keyboard.press('p')
+  await desktopPage.getByRole('button', { name: 'Volver al menú' }).click()
+  await desktopPage.getByRole('heading', { name: 'ELEGÍ TU SUFRIMIENTO' }).waitFor({ state: 'visible' })
+  await desktopPage.getByRole('button', { name: 'Empezar partida' }).click()
+
   await desktopPage.getByRole('button', { name: 'Silenciar sonido' }).click()
   await desktopPage.getByRole('button', { name: 'Activar sonido' }).waitFor({ state: 'visible' })
 
@@ -76,9 +88,33 @@ try {
   await desktopPage.waitForTimeout(100)
   const resetScore = await readScore(desktopPage)
   if (resetScore !== 0) throw new Error(`restart did not reset score: ${resetScore}`)
+
+  for (const level of [1, 2, 3]) {
+    await desktopPage.keyboard.press(`Shift+${level}`)
+    await desktopPage.getByText(`Level ${level}`, { exact: true }).waitFor({ state: 'visible' })
+  }
+  await desktopPage.keyboard.press('Shift+R')
+  await desktopPage.keyboard.press('Shift+I')
+  await desktopPage.getByText('DEV · INVULNERABLE', { exact: true }).waitFor({ state: 'visible' })
+  await desktopPage.keyboard.press('Shift+D')
+  await desktopPage.getByText('DEV INFO', { exact: true }).waitFor({ state: 'visible' })
   await assertRendered(desktopPage)
   if (desktopErrors.length > 0) {
     throw new Error(`desktop browser errors: ${desktopErrors.join(' | ')}`)
+  }
+
+  for (const [difficulty, lives] of [['NORMAL', 3], ['ARCADE', 3]]) {
+    const difficultyPage = await desktopContext.newPage()
+    const difficultyErrors = []
+    difficultyPage.on('pageerror', (error) => difficultyErrors.push(error.message))
+    await difficultyPage.goto(gameUrl, { waitUntil: 'networkidle' })
+    await difficultyPage.getByRole('button', { name: difficulty }).click()
+    await difficultyPage.getByRole('button', { name: 'Empezar partida' }).click()
+    await difficultyPage.getByLabel(`${lives} vidas`).waitFor({ state: 'visible' })
+    if (difficultyErrors.length > 0) {
+      throw new Error(`${difficulty} browser errors: ${difficultyErrors.join(' | ')}`)
+    }
+    await difficultyPage.close()
   }
   await desktopContext.close()
 

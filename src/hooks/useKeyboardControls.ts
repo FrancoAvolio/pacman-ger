@@ -34,6 +34,23 @@ export function useKeyboardControls() {
         return
       }
 
+      if (store.status === 'ready' && event.code === 'ArrowLeft') {
+        event.preventDefault()
+        useGameStore.getState().cycleDifficulty('previous')
+        return
+      }
+
+      if (store.status === 'ready' && event.code === 'ArrowRight') {
+        event.preventDefault()
+        useGameStore.getState().cycleDifficulty('next')
+        return
+      }
+
+      if (store.status === 'ready' && KEY_DIRECTIONS[event.code]) {
+        event.preventDefault()
+        return
+      }
+
       const direction = KEY_DIRECTIONS[event.code]
       if (!direction) return
 

@@ -11,9 +11,16 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. Use arrow keys or WASD to move, `P`/`Esc`
-to pause, `M` to mute, and `R` to start a new campaign. On touch devices,
-swipe directly over the game to queue turns.
+Open the local URL printed by Vite. Choose `TRANQUI`, `NORMAL`, or `ARCADE` on
+the start screen; the selection remains active across the three-level
+campaign. Use arrow keys or WASD to move, `P`/`Esc` to pause, `M` to mute, and
+`R` to start a new campaign. On touch devices, swipe directly over the game to
+queue turns.
+
+Development-only shortcuts are available while running Vite in dev mode:
+`Shift+1`, `Shift+2`, and `Shift+3` load a clean level for inspection, `Shift+R`
+reloads the current level, `Shift+I` toggles invulnerability, and `Shift+D`
+toggles the compact debug overlay. They are disabled in production builds.
 
 Score and remaining lives carry across all three levels. Every maze includes a
 bidirectional side tunnel and offers one timed 1000-point train ticket after

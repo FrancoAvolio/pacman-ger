@@ -1,4 +1,8 @@
 import { OPPOSITE_DIRECTION } from './constants'
+import {
+  DEFAULT_DIFFICULTY,
+  getEffectiveGhostReleaseDelay,
+} from './difficulty'
 import { DEFAULT_LEVEL } from './levels'
 import type { LevelConfig } from './levels'
 import { isWalkable, tileKey } from './maze'
@@ -40,8 +44,9 @@ export function isGhostReleased(
   personality: GhostPersonality,
   activeMs: number,
   level: LevelConfig = DEFAULT_LEVEL,
+  difficulty = DEFAULT_DIFFICULTY,
 ): boolean {
-  return activeMs >= level.ghostReleaseDelaysMs[personality]
+  return activeMs >= getEffectiveGhostReleaseDelay(level, difficulty, personality)
 }
 
 export function shouldGhostMove(
@@ -49,8 +54,9 @@ export function shouldGhostMove(
   activeMs: number,
   state: GhostState,
   level: LevelConfig = DEFAULT_LEVEL,
+  difficulty = DEFAULT_DIFFICULTY,
 ): boolean {
-  return state === 'EATEN' || isGhostReleased(personality, activeMs, level)
+  return state === 'EATEN' || isGhostReleased(personality, activeMs, level, difficulty)
 }
 
 export function getFrightenedVisualState(remainingMs: number): FrightenedVisualState {
